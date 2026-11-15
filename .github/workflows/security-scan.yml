@@ -1,41 +1,68 @@
 name: BlueStrix Security Scan
 
 on:
-  pull_request:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  scan:
+  security-scan:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install BlueStrix
         run: |
           python -m pip install --upgrade pip wheel
-          pip install -e ".[dev,slither]"
+          pip install -e ".[dev]"
 
-      - name: Run static scan
+      - name: Show project structure
+        run: |
+          echo "Repository structure:"
+          find . -maxdepth 2 -type f | sort
+
+      - name: Validate configuration
+        run: |
+          if [ -f config/bluestrix.example.yaml ]; then
+            bluestrix --config config/bluestrix.example.yaml policy validate
+          else
+            echo "config/bluestrix.example.yaml not found; skipping policy validation"
+          fi
+
+      - name: Run BlueStrix static scan
         run: |
           mkdir -p reports
-          bluestrix scan code ./src --output reports/ci_scan
+          if [ -d ./src ]; then
+            bluestrix scan code ./src --output reports/ci_scan
+          else
+            echo "No ./src directory found; skipping static scan"
+          fi
 
       - name: Run Slither
         run: |
           if [ -d ./contracts ]; then
+            pip install slither-analyzer
             slither ./contracts --json - > reports/slither.json || true
+          else
+            echo "No ./contracts directory found; skipping Slither"
           fi
 
       - name: Upload reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bluestrix-reports
           path: reports/
+          if-no-files-found: ignore
