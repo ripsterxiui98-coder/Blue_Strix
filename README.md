@@ -81,6 +81,45 @@ bluestrix api --host 127.0.0.1 --port 8787
 ./scripts/run_smoke_tests.sh
 ./scripts/run_full_test_suite.sh
 ```
+# BlueStrix Sandbox
+
+Sandbox lengkap untuk menjalankan BlueStrix secara aman.
+
+Dua lapis sandbox:
+
+1. Docker container - untuk analisis tepercaya.
+2. Firecracker microVM - untuk kode tidak tepercaya, Slither, Foundry, fuzzing.
+
+## Arsitektur
+
+Host
+├── Docker Compose
+│   ├── bluestrix-api
+│   ├── bluestrix-worker
+│   ├── postgres
+│   └── redis
+└── Sandbox Layer
+    ├── Docker container
+    └── Firecracker microVM
+
+## Instalasi Docker
+
+./scripts/install_docker.sh
+docker compose up -d
+
+## Instalasi Firecracker
+
+./scripts/install_firecracker.sh
+./scripts/run_microvm_scan.sh ./target-repo
+
+## Aturan
+
+- Kode tidak dikenal wajib microVM.
+- Docker container hanya untuk kode tepercaya.
+- Network default deny.
+- Filesystem default read-only.
+- Tidak ada akses Docker socket host.
+- Tidak ada private key di sandbox.
 
 ## Batasan
 
