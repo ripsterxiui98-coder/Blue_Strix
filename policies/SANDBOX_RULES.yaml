@@ -1,0 +1,45 @@
+sandbox:
+  enabled: true
+  default_for_untrusted_code: microvm
+  default_for_trusted_code: docker_container
+
+  docker:
+    user: "10001:10001"
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    cpus: "0.5"
+    pids_limit: 128
+    timeout_seconds: 300
+    allowed_mounts:
+      - "/workspace:ro"
+      - "/reports:rw"
+    blocked_paths:
+      - "/etc"
+      - "/root"
+      - "/home"
+      - "/var/run/docker.sock"
+
+  microvm:
+    engine: firecracker
+    vcpu_count: 1
+    mem_size_mib: 512
+    network_enabled: false
+    rootfs_read_only: false
+    timeout_seconds: 600
+    allowed_mounts:
+      - "/workspace:ro"
+      - "/reports:rw"
+
+  secrets:
+    allowed_in_sandbox: false
+    blocked_env_keys:
+      - PRIVATE_KEY
+      - MNEMONIC
+      - SEED_PHRASE
+      - RECOVERY_PHRASE
+      - WALLET_SEED
