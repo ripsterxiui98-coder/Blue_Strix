@@ -1,0 +1,134 @@
+const API_URL =
+  process.env.NEXT_PUBLIC_BLUESTRIX_API_URL?.replace(/\/$/, "") ||
+  "http://127.0.0.1:8787";
+
+export type FindingSummary = {
+  finding_id: string;
+  rule_id?: string | null;
+  title: string;
+  severity: string;
+  status: string;
+  category?: string;
+  target: string;
+  confidence?: number;
+  created_at?: string | null;
+};
+
+async function apiGet<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(`API ${path} failed: ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function apiWrite<T>(
+  path: string,
+  method: string,
+  body: unknown,
+  operator: string,
+  approvalToken?: string,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "X-BlueStrix-Operator": operator,
+  };
+  if (approvalToken) {
+    headers["X-BlueStrix-Approval-Token"] = approvalToken;
+  }
+  const res = await fetch(`${API_URL}${path}`, {
+    method,
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`API ${path} failed: ${res.status} ${detail}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function fetchHealth() {
+  return apiGet<{ status: string; mode: string; execution: string }>("/health");
+}
+
+export async function fetchFindings(params?: {
+  status?: string;
+  severity?: string;
+  target?: string;
+}) {
+  const q = new URLSearchParams();
+  if (params?.status) q.set("status", params.status);
+  if (params?.severity) q.set("severity", params.severity);
+  if (params?.target) q.set("target", params.target);
+  const qs = q.toString();
+  return apiGet<{ count: number; findings: FindingSummary[] }>(
+    `/findings${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function fetchFinding(id: string) {
+  return apiGet<Record<string, unknown>>(`/findings/${encodeURIComponent(id)}`);
+}
+
+export async function fetchAudit(limit = 50) {
+  return apiGet<{ count: number; events: Record<string, unknown>[] }>(
+    `/audit?limit=${limit}`,
+  );
+}
+
+export async function fetchProposals() {
+  return apiGet<{ count: number; proposals: Record<string, unknown>[] }>(
+    "/remediation/proposals",
+  );
+}
+
+export async function updateFindingStatus(
+  findingId: string,
+  status: string,
+  operator: string,
+) {
+  return apiWrite(
+    `/findings/${encodeURIComponent(findingId)}/status`,
+    "PATCH",
+    { status },
+    operator,
+  );
+}
+
+export async function createProposal(
+  payload: {
+    finding_id: string;
+    title: string;
+    target: string;
+    proposed_change?: string;
+    severity?: string;
+  },
+  operator: string,
+) {
+  return apiWrite("/remediation/proposals", "POST", payload, operator);
+}
+
+export async function createApproval(
+  payload: {
+    finding_id: string;
+    proposal_id?: string;
+    status: string;
+  },
+  operator: string,
+  approvalToken?: string,
+) {
+  return apiWrite(
+    "/remediation/approvals",
+    "POST",
+    payload,
+    operator,
+    approvalToken,
+  );
+}
+
+export { API_URL };
