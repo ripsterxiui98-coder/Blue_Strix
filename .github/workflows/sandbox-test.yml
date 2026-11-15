@@ -1,0 +1,21 @@
+name: Sandbox Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Docker Compose
+        run: docker compose config
+
+      - name: Validate sandbox policy
+        run: ./scripts/validate_sandbox.sh
+
+      - name: Run container scan
+        run: ./scripts/run_container_scan.sh ./tests/fixtures ./reports
