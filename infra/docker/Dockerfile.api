@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN useradd -m -u 10001 bluestrix
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY src ./src
+COPY config ./config
+COPY policies ./policies
+COPY rules ./rules
+
+RUN pip install --no-cache-dir .
+
+USER bluestrix
+
+EXPOSE 8787
+
+CMD ["bluestrix", "api", "--host", "0.0.0.0", "--port", "8787"]
