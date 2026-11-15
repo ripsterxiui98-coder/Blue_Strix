@@ -55,12 +55,18 @@ jobs:
       - name: Validate sandbox policy
         run: |
           if [ -f scripts/validate_sandbox.sh ]; then
-            bash scripts/validate_sandbox.sh || {
-              echo "validate_sandbox.sh exited non-zero; treating as warning unless socket/privileged"
-            }
+            bash scripts/validate_sandbox.sh
           else
-            echo "scripts/validate_sandbox.sh not found; skipping validation"
+            echo "scripts/validate_sandbox.sh not found; failing"
+            exit 1
           fi
+
+      - name: Validate sandbox isolation
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install pyyaml pytest
+          bash scripts/validate_sandbox.sh
+          python -m pytest tests/sandbox -q
 
       - name: Run container scan
         run: |
