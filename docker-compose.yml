@@ -12,6 +12,13 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bluestrix} -d ${POSTGRES_DB:-bluestrix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Not published to host — internal network only
 
   redis:
     image: redis:7-alpine
@@ -28,11 +35,14 @@ services:
     environment:
       BLUESTRIX_MODE: defensive
       BLUESTRIX_EXECUTION: restricted
+      DATABASE_URL: ${DATABASE_URL}
     ports:
       - "127.0.0.1:8787:8787"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - internal
 
@@ -44,9 +54,12 @@ services:
     environment:
       BLUESTRIX_MODE: defensive
       BLUESTRIX_EXECUTION: restricted
+      DATABASE_URL: ${DATABASE_URL}
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - internal
 
