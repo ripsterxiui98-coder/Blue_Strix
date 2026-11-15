@@ -70,8 +70,7 @@ services:
     volumes:
       - ./target:/workspace:ro
       - ./reports:/reports
-    networks:
-      - none
+    # Do NOT attach to a named network when network_mode: none is set
 
 networks:
   internal:
