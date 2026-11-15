@@ -3,13 +3,12 @@
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ALL_ROLES, type Role } from "@/lib/roles";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("analyst");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("security_analyst");
+  const [mfaCode, setMfaCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -18,14 +17,14 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     const res = await signIn("credentials", {
-      username,
+      email,
       password,
-      role,
+      mfaCode: mfaCode || undefined,
       redirect: false,
     });
     setLoading(false);
     if (res?.error) {
-      setError("Invalid credentials or role");
+      setError("Login failed. Check email, password, MFA, or rate limits.");
       return;
     }
     router.replace("/dashboard");
@@ -40,17 +39,18 @@ export default function LoginPage() {
         <div>
           <h1 className="text-2xl font-semibold">BlueStrix Login</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Defensive access only. No private keys. Demo password from{" "}
-            <code>DASHBOARD_DEMO_PASSWORD</code>.
+            Production auth via API. No demo passwords. Admin requires MFA TOTP.
           </p>
         </div>
         <label className="block text-sm">
-          Operator name
+          Email
           <input
+            type="email"
             className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             required
+            autoComplete="username"
           />
         </label>
         <label className="block text-sm">
@@ -61,21 +61,18 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
+            autoComplete="current-password"
           />
         </label>
         <label className="block text-sm">
-          Role
-          <select
+          MFA code (required for admin)
+          <input
             className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-3 py-2"
-            value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
-          >
-            {ALL_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+            value={mfaCode}
+            onChange={(e) => setMfaCode(e.target.value)}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+          />
         </label>
         {error && <p className="text-sm text-red-400">{error}</p>}
         <button

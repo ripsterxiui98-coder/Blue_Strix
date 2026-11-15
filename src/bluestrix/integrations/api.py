@@ -19,6 +19,7 @@ from bluestrix.intelligence.verification.persistence import (
     compare_with_previous_scan,
     save_scan_results,
 )
+from bluestrix.integrations.auth_routes import router as auth_router
 from bluestrix.policy.engine import PolicyEngine
 from bluestrix.policy.scope import ScopeEnforcer
 
@@ -76,6 +77,7 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
     verifier = VerificationEngine()
 
     app = FastAPI(title="BlueStrix v8.0", version="8.0.0")
+    app.include_router(auth_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -268,7 +270,6 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         operator: tuple[str, Optional[str]] = Depends(_require_operator),
     ) -> dict[str, Any]:
         op_name, token = operator
-        # Token is hashed only — never stored in cleartext
         record = repo.create_approval_record(
             db,
             finding_id=body.finding_id,
@@ -277,10 +278,11 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
             proposal_id=body.proposal_id,
             approval_token=token,
         )
+        action = "approval_granted" if body.status == "approved" else "approval_denied"
         repo.create_audit_event(
             db,
             actor=op_name,
-            action="remediation_approval",
+            action=action,
             target=body.finding_id,
             decision=body.status.upper(),
             reason="human governance approval recorded",
