@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "required": ["finding_id", "title", "description", "severity", "status", "target"],
+  "properties": {
+    "finding_id": {"type": "string"},
+    "title": {"type": "string"},
+    "description": {"type": "string"},
+    "severity": {"type": "string", "enum": ["CRITICAL","HIGH","MEDIUM","LOW","INFO"]},
+    "status": {"type": "string", "enum": ["PASS","FAIL","INCOMPLETE","UNAVAILABLE","NOT_TESTED","BLOCKED"]},
+    "target": {"type": "string"}
+  }
+}
