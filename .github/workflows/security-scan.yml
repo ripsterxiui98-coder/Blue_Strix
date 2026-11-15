@@ -1,0 +1,41 @@
+name: BlueStrix Security Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install BlueStrix
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -e ".[dev,slither]"
+
+      - name: Run static scan
+        run: |
+          mkdir -p reports
+          bluestrix scan code ./src --output reports/ci_scan
+
+      - name: Run Slither
+        run: |
+          if [ -d ./contracts ]; then
+            slither ./contracts --json - > reports/slither.json || true
+          fi
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: bluestrix-reports
+          path: reports/
