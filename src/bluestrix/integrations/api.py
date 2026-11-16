@@ -4,7 +4,9 @@ import os
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from datetime import datetime, timezone
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,7 +14,11 @@ from bluestrix.core import repository as repo
 from bluestrix.core.audit import AuditLog
 from bluestrix.core.config import load_config
 from bluestrix.core.database import get_db
+from bluestrix.core.auth import decode_token
 from bluestrix.core.models import ActionType
+from bluestrix.core.models_db import AuthSession, User
+from bluestrix.core.rbac import has_permission
+from bluestrix.integrations.auth_routes import router as auth_router
 from bluestrix.gateway.health import liveness, readiness
 from bluestrix.intelligence.ai_triage import triage_findings
 from bluestrix.intelligence.assets.wallet import AssetProtectionEngine
@@ -71,18 +77,46 @@ class ReportRequest(BaseModel):
     incident_id: str | None = None
 
 
-def _require_operator(
-    x_bluestrix_operator: Optional[str] = Header(default=None, alias="X-BlueStrix-Operator"),
-    x_bluestrix_approval_token: Optional[str] = Header(
-        default=None, alias="X-BlueStrix-Approval-Token"
-    ),
-) -> tuple[str, Optional[str]]:
-    if not x_bluestrix_operator:
-        raise HTTPException(
-            status_code=401,
-            detail="Write endpoints require X-BlueStrix-Operator header",
-        )
-    return x_bluestrix_operator, x_bluestrix_approval_token
+def _current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """Resolve the caller from a Bearer access token.
+
+    The operator identity is never read from request headers. The role is read from the
+    database (not the token), so a role change takes effect immediately.
+    """
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+    try:
+        claims = decode_token(auth.split(" ", 1)[1].strip())
+        if claims.get("typ") != "access":
+            raise ValueError("wrong token type")
+        session_row = db.get(AuthSession, UUID(str(claims["sid"])))
+        user = db.get(User, UUID(str(claims["sub"])))
+    except (ValueError, KeyError, TypeError):
+        raise HTTPException(status_code=401, detail="invalid token") from None
+    if session_row is None or session_row.revoked_at is not None:
+        raise HTTPException(status_code=401, detail="session revoked")
+    expires = session_row.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if expires < datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="session expired")
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="user inactive")
+    return user
+
+
+def _require(permission: str):
+    """FastAPI dependency: authenticated caller that holds ``permission`` for their role."""
+
+    def _dependency(user: User = Depends(_current_user)) -> User:
+        if not has_permission(user.role, permission):
+            raise HTTPException(
+                status_code=403, detail=f"role '{user.role}' lacks {permission}"
+            )
+        return user
+
+    return _dependency
 
 
 def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
@@ -244,9 +278,9 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         finding_id: str,
         body: FindingStatusUpdate,
         db: Session = Depends(get_db),
-        operator: tuple[str, Optional[str]] = Depends(_require_operator),
+        user: User = Depends(_require("update_finding_status")),
     ) -> dict[str, Any]:
-        op_name, _token = operator
+        op_name = user.email
         row = repo.update_finding_status(db, finding_id, body.status)
         if row is None:
             raise HTTPException(status_code=404, detail="Finding not found")
@@ -283,9 +317,9 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
     def post_remediation_proposal(
         body: RemediationProposalRequest,
         db: Session = Depends(get_db),
-        operator: tuple[str, Optional[str]] = Depends(_require_operator),
+        user: User = Depends(_require("propose_remediation")),
     ) -> dict[str, Any]:
-        op_name, _token = operator
+        op_name = user.email
         proposal = repo.create_remediation_proposal(
             db,
             finding_id=body.finding_id,
@@ -333,9 +367,13 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
     def post_remediation_approval(
         body: ApprovalRequest,
         db: Session = Depends(get_db),
-        operator: tuple[str, Optional[str]] = Depends(_require_operator),
+        user: User = Depends(_require("approve_remediation")),
+        x_bluestrix_approval_token: Optional[str] = Header(
+            default=None, alias="X-BlueStrix-Approval-Token"
+        ),
     ) -> dict[str, Any]:
-        op_name, token = operator
+        op_name = user.email
+        token = x_bluestrix_approval_token
         record = repo.create_approval_record(
             db,
             finding_id=body.finding_id,
@@ -359,4 +397,5 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
             "token_stored": "hash_only" if record.approval_token_hash else "none",
         }
 
+    app.include_router(auth_router)
     return app

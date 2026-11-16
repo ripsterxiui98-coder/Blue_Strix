@@ -29,14 +29,17 @@ async function apiWrite<T>(
   path: string,
   method: string,
   body: unknown,
-  operator: string,
+  accessToken: string,
   approvalToken?: string,
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
-    "X-BlueStrix-Operator": operator,
   };
+  // Identity comes from the server-verified session token, never from a client-chosen name.
+  if (accessToken) {
+    headers["Authorization"] = `Bearer ${accessToken}`;
+  }
   if (approvalToken) {
     headers["X-BlueStrix-Approval-Token"] = approvalToken;
   }
@@ -50,6 +53,11 @@ async function apiWrite<T>(
     throw new Error(`API ${path} failed: ${res.status} ${detail}`);
   }
   return res.json() as Promise<T>;
+}
+
+/** Pull the access token NextAuth stored in the session (empty string when signed out). */
+export function accessTokenOf(session: unknown): string {
+  return (session as { accessToken?: string } | null)?.accessToken ?? "";
 }
 
 export async function fetchHealth() {
@@ -90,13 +98,13 @@ export async function fetchProposals() {
 export async function updateFindingStatus(
   findingId: string,
   status: string,
-  operator: string,
+  accessToken: string,
 ) {
   return apiWrite(
     `/findings/${encodeURIComponent(findingId)}/status`,
     "PATCH",
     { status },
-    operator,
+    accessToken,
   );
 }
 
@@ -108,9 +116,9 @@ export async function createProposal(
     proposed_change?: string;
     severity?: string;
   },
-  operator: string,
+  accessToken: string,
 ) {
-  return apiWrite("/remediation/proposals", "POST", payload, operator);
+  return apiWrite("/remediation/proposals", "POST", payload, accessToken);
 }
 
 export async function createApproval(
@@ -119,14 +127,14 @@ export async function createApproval(
     proposal_id?: string;
     status: string;
   },
-  operator: string,
+  accessToken: string,
   approvalToken?: string,
 ) {
   return apiWrite(
     "/remediation/approvals",
     "POST",
     payload,
-    operator,
+    accessToken,
     approvalToken,
   );
 }

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useParams } from "next/navigation";
 import { RequireAuth } from "@/components/RequireAuth";
-import { fetchFinding, updateFindingStatus } from "@/lib/api";
+import { accessTokenOf, fetchFinding, updateFindingStatus } from "@/lib/api";
 import { can } from "@/lib/roles";
 
 export default function FindingDetailPage() {
@@ -16,7 +16,7 @@ export default function FindingDetailPage() {
 
   const mutation = useMutation({
     mutationFn: (status: string) =>
-      updateFindingStatus(id, status, session?.user?.name || "operator"),
+      updateFindingStatus(id, status, accessTokenOf(session)),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["finding", id] }),
   });
 

@@ -73,3 +73,17 @@ def test_login_fail_audited(client: TestClient):
         json={"email": "a@example.com", "password": "wrong-password-xx"},
     )
     assert bad.status_code == 401
+
+
+def test_registration_closed_after_bootstrap(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("BLUESTRIX_ALLOW_REGISTRATION", raising=False)
+    first = client.post(
+        "/auth/register",
+        json={"email": "owner@example.com", "password": "bootstrap-password"},
+    )
+    assert first.status_code == 200
+    second = client.post(
+        "/auth/register",
+        json={"email": "intruder@example.com", "password": "another-password-1"},
+    )
+    assert second.status_code == 403
