@@ -39,7 +39,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Minimal config so create_app can load
     config_path = tmp_path / "bluestrix.yaml"
     config_path.write_text(
-        "version: '8.0'\nmode: defensive\nscope:\n  default_action: allow\n  authorized_targets:\n    repository_paths: ['./']\n",
+        "version: '8.0'\nmode: defensive\npolicy:\n  fail_secure: true\nscope:\n  default_action: allow\n  authorized_targets:\n    repository_paths: ['./']\n",
         encoding="utf-8",
     )
 
