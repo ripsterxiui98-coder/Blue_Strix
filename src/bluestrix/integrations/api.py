@@ -149,7 +149,7 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
     @app.post("/scan/code")
     def scan_code(
         request: CodeScanRequest,
-        db: Session = Depends(get_db),
+        db: Session = Depends(get_db), user: User = Depends(_require("view_scans")),
     ) -> dict[str, Any]:
         try:
             policy_engine.scope.enforce(request.path, action=ActionType.READ.value)
@@ -176,7 +176,9 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/asset/wallet")
-    def analyze_wallet(request: WalletRequest) -> dict[str, Any]:
+    def analyze_wallet(
+        request: WalletRequest, user: User = Depends(_require("view_findings"))
+    ) -> dict[str, Any]:
         try:
             policy_engine.scope.enforce(request.address, action=ActionType.READ.value)
             finding = asset_engine.analyze_address(request.address, request.chain)
@@ -185,11 +187,14 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/triage")
-    def post_triage(request: TriageRequest) -> dict[str, Any]:
-        if request.use_llm and not request.human_approved:
+    def post_triage(
+        request: TriageRequest, user: User = Depends(_require("view_findings"))
+    ) -> dict[str, Any]:
+        # LLM path disabled: human_approved is a client-set flag, not a real approval.
+        if request.use_llm:
             raise HTTPException(
                 status_code=403,
-                detail="LLM triage requires human_approved=true",
+                detail="LLM triage is disabled until a human approval workflow exists",
             )
         items = triage_findings(
             request.findings,
@@ -205,11 +210,14 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         return {"count": len(items), "items": items, "auto_actions": []}
 
     @app.post("/report")
-    def post_report(request: ReportRequest) -> dict[str, Any]:
-        if request.use_llm and not request.human_approved:
+    def post_report(
+        request: ReportRequest, user: User = Depends(_require("view_findings"))
+    ) -> dict[str, Any]:
+        # LLM path disabled: human_approved is a client-set flag, not a real approval.
+        if request.use_llm:
             raise HTTPException(
                 status_code=403,
-                detail="LLM report enrichment requires human_approved=true",
+                detail="LLM report enrichment is disabled until a human approval workflow exists",
             )
         report = generate_full_report(
             request.findings,
