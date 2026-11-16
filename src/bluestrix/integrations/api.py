@@ -12,10 +12,10 @@ from bluestrix.core.audit import AuditLog
 from bluestrix.core.config import load_config
 from bluestrix.core.database import get_db
 from bluestrix.core.models import ActionType
+from bluestrix.intelligence.ai_triage import triage_findings
 from bluestrix.intelligence.assets.wallet import AssetProtectionEngine
-from bluestrix.intelligence.attack_path import analyze_attack_paths
 from bluestrix.intelligence.code.analyzer import CodeIntelligenceEngine
-from bluestrix.intelligence.risk import rank_findings, score_finding
+from bluestrix.intelligence.report import generate_full_report
 from bluestrix.intelligence.verification.engine import VerificationEngine
 from bluestrix.intelligence.verification.persistence import (
     compare_with_previous_scan,
@@ -55,17 +55,18 @@ class ApprovalRequest(BaseModel):
     status: str = Field(default="approved", pattern="^(pending|approved|rejected)$")
 
 
-class RiskScoreRequest(BaseModel):
+class TriageRequest(BaseModel):
     findings: list[dict[str, Any]]
-    weights: dict[str, float] | None = None
+    use_llm: bool = False
+    human_approved: bool = False
 
 
-class AttackPathRequest(BaseModel):
-    graph: dict[str, Any]
-    source: str
-    target: str
-    max_depth: int = Field(default=8, ge=1, le=16)
-    max_paths: int = Field(default=20, ge=1, le=100)
+class ReportRequest(BaseModel):
+    findings: list[dict[str, Any]]
+    title: str = "BlueStrix Assessment Report"
+    use_llm: bool = False
+    human_approved: bool = False
+    incident_id: str | None = None
 
 
 def _require_operator(
@@ -134,37 +135,42 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.post("/risk/score")
-    def risk_score(request: RiskScoreRequest) -> dict[str, Any]:
-        """Score and rank findings — advisory only."""
-        ranked = rank_findings(request.findings, weights=request.weights)
-        audit_log.record(
-            "risk_score",
-            f"{len(ranked)} findings",
-            "COMPLETED",
-            "advisory ranking",
-        )
-        return {"count": len(ranked), "ranked": ranked, "auto_actions": []}
-
-    @app.post("/risk/attack-path")
-    def risk_attack_path(request: AttackPathRequest) -> dict[str, Any]:
-        try:
-            result = analyze_attack_paths(
-                request.graph,
-                source=request.source,
-                target=request.target,
-                max_depth=request.max_depth,
-                max_paths=request.max_paths,
+    @app.post("/triage")
+    def post_triage(request: TriageRequest) -> dict[str, Any]:
+        if request.use_llm and not request.human_approved:
+            raise HTTPException(
+                status_code=403,
+                detail="LLM triage requires human_approved=true",
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit_log.record(
-            "attack_path_analysis",
-            f"{request.source}->{request.target}",
-            "COMPLETED",
-            f"{result['path_count']} paths",
+        items = triage_findings(
+            request.findings,
+            use_llm=request.use_llm,
+            human_approved=request.human_approved,
         )
-        return result
+        audit_log.record(
+            "ai_triage",
+            f"{len(items)} findings",
+            "COMPLETED",
+            f"engine={'llm' if request.use_llm and request.human_approved else 'local'}",
+        )
+        return {"count": len(items), "items": items, "auto_actions": []}
+
+    @app.post("/report")
+    def post_report(request: ReportRequest) -> dict[str, Any]:
+        if request.use_llm and not request.human_approved:
+            raise HTTPException(
+                status_code=403,
+                detail="LLM report enrichment requires human_approved=true",
+            )
+        report = generate_full_report(
+            request.findings,
+            title=request.title,
+            use_llm=request.use_llm,
+            human_approved=request.human_approved,
+            incident_id=request.incident_id,
+        )
+        audit_log.record("report_generated", request.title, "COMPLETED", "full report")
+        return report
 
     @app.get("/findings")
     def list_findings(
