@@ -1,0 +1,31 @@
+{
+  "name": "bluestrix-community-examples",
+  "version": "1.0.0",
+  "kind": "custom",
+  "description": "Unsigned local example pack (use kind=community + HMAC for production).",
+  "rules": [
+    {
+      "rule_id": "COMMUNITY-SOL-TX-ORIGIN",
+      "title": "Use of tx.origin for authorization",
+      "description": "tx.origin in access control is unsafe under phishing-style attacks.",
+      "severity": "HIGH",
+      "language": "solidity",
+      "pattern": "tx\\.origin",
+      "recommendation": "Use msg.sender for authorization checks.",
+      "references": ["https://swcregistry.io/docs/SWC-115"],
+      "cwe_id": "CWE-284",
+      "version": "1.0.0"
+    },
+    {
+      "rule_id": "COMMUNITY-PY-EVAL",
+      "title": "Dangerous eval usage",
+      "description": "Dynamic eval can lead to code injection.",
+      "severity": "CRITICAL",
+      "language": "python",
+      "pattern": "\\beval\\s*\\(",
+      "recommendation": "Avoid eval; use safe parsers or explicit allowlists.",
+      "cwe_id": "CWE-95",
+      "version": "1.0.0"
+    }
+  ]
+}
