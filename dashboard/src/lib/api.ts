@@ -14,11 +14,19 @@ export type FindingSummary = {
   created_at?: string | null;
 };
 
+/** Access token for read requests. Set by Providers from the NextAuth session. */
+let apiAccessToken = "";
+
+export function setApiAccessToken(token: string): void {
+  apiAccessToken = token;
+}
+
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (apiAccessToken) {
+    headers["Authorization"] = `Bearer ${apiAccessToken}`;
+  }
+  const res = await fetch(`${API_URL}${path}`, { cache: "no-store", headers });
   if (!res.ok) {
     throw new Error(`API ${path} failed: ${res.status}`);
   }
