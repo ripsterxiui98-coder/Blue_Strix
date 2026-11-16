@@ -26,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"BlueStrix {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    auth_parser = subparsers.add_parser("auth", help="server-side account bootstrap")
+    auth_sub = auth_parser.add_subparsers(dest="auth_command", required=True)
+    mfa_boot = auth_sub.add_parser("bootstrap-mfa", help="issue admin TOTP from the server console")
+    mfa_boot.add_argument("--email", required=True)
+    mfa_boot.add_argument("--force", action="store_true", help="reset MFA if already enabled")
+
     policy_parser = subparsers.add_parser("policy")
     policy_sub = policy_parser.add_subparsers(dest="policy_command", required=True)
     policy_sub.add_parser("validate")
@@ -92,6 +98,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.command == "auth" and args.auth_command == "bootstrap-mfa":
+            from bluestrix.core.bootstrap import bootstrap_admin_mfa
+            from bluestrix.core.database import SessionLocal
+
+            db = SessionLocal()
+            try:
+                _print_json(bootstrap_admin_mfa(db, args.email, force=args.force))
+            finally:
+                db.close()
+            return 0
+
         if args.command == "policy" and args.policy_command == "validate":
             config, policy_engine, _ = _load_context(args.config)
             errors = policy_engine.validate_files()
