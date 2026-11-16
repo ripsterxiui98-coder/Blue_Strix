@@ -1,0 +1,90 @@
+name: Sandbox Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show repository structure
+        run: |
+          echo "Repository structure:"
+          find . -maxdepth 3 \( -type f -o -type d \) | sort | head -200
+
+      - name: Validate Docker Compose
+        run: |
+          if [ ! -f docker-compose.yml ]; then
+            echo "docker-compose.yml not found; skipping validation"
+            exit 0
+          fi
+          export POSTGRES_USER=ci
+          export POSTGRES_PASSWORD=ci
+          export POSTGRES_DB=ci
+          export REDIS_PASSWORD=ci
+          if [ -f .env.example ]; then
+            set -a
+            # shellcheck disable=SC1091
+            source .env.example || true
+            set +a
+          fi
+          if docker compose config >/tmp/compose.out 2>/tmp/compose.err; then
+            echo "docker compose config: OK"
+            head -50 /tmp/compose.out
+          else
+            echo "docker compose config failed (non-fatal for CI structure check):"
+            cat /tmp/compose.err || true
+            if grep -E 'docker\.sock|privileged:\s*true' docker-compose.yml; then
+              echo "ERROR: forbidden security setting in docker-compose.yml"
+              exit 1
+            fi
+            echo "Compose parse issues present but no forbidden security settings; continuing"
+          fi
+
+      - name: Validate sandbox policy
+        run: |
+          if [ -f scripts/validate_sandbox.sh ]; then
+            bash scripts/validate_sandbox.sh
+          else
+            echo "scripts/validate_sandbox.sh not found; failing"
+            exit 1
+          fi
+
+      - name: Validate sandbox isolation
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install pyyaml pytest
+          bash scripts/validate_sandbox.sh
+          python -m pytest tests/sandbox -q
+
+      - name: Run container scan
+        run: |
+          mkdir -p reports
+          if [ -f scripts/run_container_scan.sh ]; then
+            if [ -d ./tests/fixtures ]; then
+              bash scripts/run_container_scan.sh ./tests/fixtures ./reports
+            else
+              echo "tests/fixtures not found; skipping container scan"
+            fi
+          else
+            echo "scripts/run_container_scan.sh not found; skipping container scan"
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-reports
+          path: reports/
+          if-no-files-found: ignore

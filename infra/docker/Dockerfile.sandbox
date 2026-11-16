@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN useradd -m -u 10001 bluestrix
+WORKDIR /workspace
+
+COPY pyproject.toml /opt/bluestrix/
+COPY src /opt/bluestrix/src
+COPY config /opt/bluestrix/config
+COPY policies /opt/bluestrix/policies
+COPY rules /opt/bluestrix/rules
+
+RUN pip install --no-cache-dir /opt/bluestrix
+
+USER bluestrix
+
+CMD ["/bin/bash"]

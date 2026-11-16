@@ -1,0 +1,99 @@
+version: "8.0"
+mode: defensive
+default_execution: restricted
+require_human_approval: true
+
+governance:
+  operator_roles:
+    - security_analyst
+    - protocol_owner
+    - incident_responder
+  approval_required_actions:
+    - write
+    - deploy
+    - transfer
+    - sign
+    - execute
+    - remediate
+
+policy:
+  security_constitution: policies/SECURITY_CONSTITUTION.md
+  scope_policy: policies/SCOPE_AND_AUTHORIZATION.md
+  action_levels: policies/ACTION_LEVELS.md
+  data_classification: policies/DATA_CLASSIFICATION.md
+  fail_secure: true
+  allow_policy_modification_by_ai: false
+
+scope:
+  default_action: deny
+  authorized_targets:
+    domains:
+      - example.com
+    ipv4_cidrs:
+      - "127.0.0.0/8"
+    evm_addresses:
+      - "0x0000000000000000000000000000000000000000"
+    solana_addresses: []
+    repository_paths:
+      - "./"
+
+intelligence:
+  code:
+    enabled: true
+    languages:
+      - solidity
+      - rust
+      - move
+      - typescript
+      - python
+    max_file_size_mb: 10
+  assets:
+    enabled: true
+  protocols:
+    enabled: true
+  threats:
+    enabled: true
+  slither:
+    enabled: false
+    binary: slither
+    timeout_seconds: 300
+
+remediation:
+  enabled: true
+  auto_fix_allowed_rules:
+    - BSX-PY-001
+    - BSX-TS-002
+  protected_paths:
+    - ".github/workflows/"
+    - ".gitlab-ci.yml"
+    - "Dockerfile"
+    - "docker-compose.yml"
+    - "k8s/"
+    - "terraform/"
+    - "policies/"
+    - "config/"
+  require_owner_approval: true
+  require_developer_review: true
+  require_regression_test: true
+  dry_run_by_default: true
+
+security_controls:
+  rate_limit:
+    max_events: 60
+    window_seconds: 60
+  secret_redaction:
+    enabled: true
+  runtime_guard:
+    block_secret_env_keys:
+      - PRIVATE_KEY
+      - MNEMONIC
+      - SEED_PHRASE
+      - RECOVERY_PHRASE
+      - WALLET_SEED
+
+reporting:
+  output_directory: reports
+  formats:
+    - json
+    - markdown
+  redact_secrets: true

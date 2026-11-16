@@ -1,0 +1,94 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bluestrix} -d ${POSTGRES_DB:-bluestrix}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Not published to host — internal network only
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    networks:
+      - internal
+
+  bluestrix-api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    restart: unless-stopped
+    environment:
+      BLUESTRIX_MODE: defensive
+      BLUESTRIX_EXECUTION: restricted
+      DATABASE_URL: ${DATABASE_URL}
+    ports:
+      - "127.0.0.1:8787:8787"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - internal
+
+  bluestrix-worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.worker
+    restart: unless-stopped
+    environment:
+      BLUESTRIX_MODE: defensive
+      BLUESTRIX_EXECUTION: restricted
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - internal
+
+  bluestrix-scanner:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.scanner
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /workspace
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    mem_limit: 512m
+    cpus: "0.5"
+    pids_limit: 128
+    volumes:
+      - ./target:/workspace:ro
+      - ./reports:/reports
+    # Do NOT attach to a named network when network_mode: none is set
+
+networks:
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:

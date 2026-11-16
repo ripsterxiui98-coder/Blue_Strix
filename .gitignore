@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+# Template is meant to be committed; real .env files stay ignored above.
+!.env.example
+*.log
+reports/
+data/audit.jsonl
+data/cache/
+data/secrets/
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+infra/firecracker/images/
+infra/firecracker/rootfs/
+infra/firecracker/kernel/
+infra/firecracker/*.sock

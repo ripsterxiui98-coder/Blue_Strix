@@ -1,0 +1,58 @@
+# BlueStrix AI router — defensive triage/reporting only. No auto-remediation.
+# API keys come from environment variables, never from this file.
+
+budget_usd_daily: 5.0
+cache_ttl_seconds: 3600
+cooldown_seconds: 30
+max_retries_per_provider: 1
+
+providers:
+  - name: deepseek
+    enabled: true
+    priority: 1
+    base_url: "https://model.inferx.net/endpoints/v1"
+    model: "deepseek-v4.1-flash-1017"
+    max_tokens: 1000
+    cost_per_1k_input: 0.00005
+    cost_per_1k_output: 0.0002
+    api_key_env: DEEPSEEK_API_KEY
+
+  - name: openai
+    enabled: true
+    priority: 2
+    base_url: "https://api.openai.com/v1"
+    model: "gpt-4o-mini"
+    max_tokens: 1000
+    cost_per_1k_input: 0.00015
+    cost_per_1k_output: 0.0006
+    api_key_env: OPENAI_API_KEY
+
+  - name: anthropic
+    enabled: true
+    priority: 3
+    base_url: "https://api.anthropic.com"
+    model: "claude-3-5-haiku-latest"
+    max_tokens: 1000
+    cost_per_1k_input: 0.0008
+    cost_per_1k_output: 0.004
+    api_key_env: ANTHROPIC_API_KEY
+
+  - name: groq
+    enabled: true
+    priority: 4
+    base_url: "https://api.groq.com/openai/v1"
+    model: "llama-3.1-8b-instant"
+    max_tokens: 1000
+    cost_per_1k_input: 0.00005
+    cost_per_1k_output: 0.00008
+    api_key_env: GROQ_API_KEY
+
+  - name: local
+    enabled: true
+    priority: 100
+    base_url: ""
+    model: "local-triage"
+    max_tokens: 0
+    cost_per_1k_input: 0.0
+    cost_per_1k_output: 0.0
+    api_key_env: ""
