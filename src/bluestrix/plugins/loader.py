@@ -45,16 +45,6 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
 
 
 class PluginLoader:
-    def __init(
-        self,
-        registry: Optional[RuleRegistry] = None,
-        *,
-        require_signature_for_community: bool = True,
-    ) -> None:
-        self.registry = registry or RuleRegistry()
-        self.require_signature_for_community = require_signature_for_community
-
-    # fix typo - Python __init__
     def __init__(
         self,
         registry: Optional[RuleRegistry] = None,
