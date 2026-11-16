@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from bluestrix.core.audit import AuditLog
 from bluestrix.core.config import load_config
 from bluestrix.core.database import get_db
 from bluestrix.core.models import ActionType
+from bluestrix.gateway.health import liveness, readiness
 from bluestrix.intelligence.ai_triage import triage_findings
 from bluestrix.intelligence.assets.wallet import AssetProtectionEngine
 from bluestrix.intelligence.code.analyzer import CodeIntelligenceEngine
@@ -96,6 +98,19 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "mode": "defensive", "execution": "restricted"}
+
+    @app.get("/health/live")
+    def health_live() -> dict[str, str]:
+        # No I/O and no AI provider calls.
+        return liveness()
+
+    @app.get("/health/ready")
+    def health_ready(response: Response) -> dict[str, Any]:
+        # Validates configuration only. Makes no provider or other paid requests.
+        ok, body = readiness(os.environ)
+        if not ok:
+            response.status_code = 503
+        return body
 
     @app.post("/scan/code")
     def scan_code(

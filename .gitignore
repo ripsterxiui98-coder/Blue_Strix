@@ -4,6 +4,8 @@ __pycache__/
 venv/
 .env
 .env.*
+# Template is meant to be committed; real .env files stay ignored above.
+!.env.example
 *.log
 reports/
 data/audit.jsonl
