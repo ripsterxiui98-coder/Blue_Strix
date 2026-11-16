@@ -1,23 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import {
   Bug,
-  CheckCircle2,
   FileText,
   Github,
   HardDrive,
   ListChecks,
-  Loader2,
   Search,
   Slack,
   Webhook,
   type LucideIcon,
 } from "lucide-react";
 import { GatewayShell } from "@/components/GatewayShell";
-
-type ConnectState = "idle" | "connecting" | "connected";
 
 type Integration = {
   id: string;
@@ -26,7 +22,10 @@ type Integration = {
   icon: LucideIcon;
 };
 
-/** Dummy catalog — wire to the BlueStrix API when integration endpoints are exposed. */
+/**
+ * Integration catalog. None of these connectors are wired to the BlueStrix API yet,
+ * so Connect is disabled instead of simulating a connection.
+ */
 const INTEGRATIONS: Integration[] = [
   { id: "github", name: "GitHub", description: "Sync repositories and pull requests", icon: Github },
   { id: "slack", name: "Slack", description: "Send finding alerts to your channels", icon: Slack },
@@ -36,53 +35,7 @@ const INTEGRATIONS: Integration[] = [
   { id: "sentry", name: "Sentry", description: "Correlate runtime errors with findings", icon: Bug },
 ];
 
-const CONNECT_DELAY_MS = 1500;
-
-function ConnectControl({ state, onConnect }: { state: ConnectState; onConnect: () => void }) {
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      {state === "connected" ? (
-        <motion.span
-          key="connected"
-          initial={{ opacity: 0, scale: 0.85 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.85 }}
-          transition={{ duration: 0.15 }}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400"
-        >
-          <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-          Connected
-        </motion.span>
-      ) : (
-        <motion.button
-          key={state}
-          type="button"
-          onClick={onConnect}
-          disabled={state === "connecting"}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.9 }}
-          transition={{ duration: 0.15 }}
-          whileTap={state === "idle" ? { scale: 0.95 } : undefined}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-shadow enabled:hover:bg-blue-500 enabled:hover:shadow-[0_0_15px_rgba(59,130,246,0.5)] disabled:cursor-wait disabled:opacity-80"
-        >
-          {state === "connecting" && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-          {state === "connecting" ? "Connecting..." : "Connect"}
-        </motion.button>
-      )}
-    </AnimatePresence>
-  );
-}
-
-function IntegrationCard({
-  item,
-  state,
-  onConnect,
-}: {
-  item: Integration;
-  state: ConnectState;
-  onConnect: (id: string) => void;
-}) {
+function IntegrationCard({ item }: { item: Integration }) {
   const Icon = item.icon;
   return (
     <motion.div
@@ -101,36 +54,26 @@ function IntegrationCard({
         <div className="truncate font-medium text-slate-100">{item.name}</div>
         <p className="truncate text-sm text-slate-400">{item.description}</p>
       </div>
-      <ConnectControl state={state} onConnect={() => onConnect(item.id)} />
+      <button
+        type="button"
+        disabled
+        aria-label={`Connect ${item.name} (not available yet)`}
+        title="Integration is not available yet"
+        className="inline-flex shrink-0 cursor-not-allowed items-center rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-500"
+      >
+        Not available yet
+      </button>
     </motion.div>
   );
 }
 
 function WebhookCard() {
-  const [url, setUrl] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    setSaved(false);
-    try {
-      const parsed = new URL(url.trim());
-      if (parsed.protocol !== "https:") throw new Error("https only");
-      // UI preview: persist through the BlueStrix API once an endpoint exists.
-      setError(null);
-      setSaved(true);
-    } catch {
-      setError("Enter a valid https:// URL.");
-    }
-  }
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.1 }}
-      className="rounded-xl border border-blue-900/50 bg-slate-900/60 p-5 backdrop-blur-xl transition-[border-color,box-shadow] duration-200 hover:border-blue-500 hover:shadow-[0_0_15px_rgba(59,130,246,0.5)]"
+      className="rounded-xl border border-blue-900/50 bg-slate-900/60 p-5 backdrop-blur-xl"
     >
       <div className="flex items-center gap-4">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-blue-950 ring-1 ring-blue-500/20">
@@ -141,37 +84,25 @@ function WebhookCard() {
           <p className="text-sm text-slate-400">Send BlueStrix events to any endpoint you control</p>
         </div>
       </div>
-
-      <form onSubmit={onSubmit} className="mt-4 flex flex-col gap-2 sm:flex-row">
+      <p className="mt-4 text-sm text-slate-500">
+        Webhook delivery is not available yet. The BlueStrix API needs a storage endpoint for webhooks first.
+      </p>
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
         <input
           type="url"
-          value={url}
-          onChange={(e) => {
-            setUrl(e.target.value);
-            setSaved(false);
-            setError(null);
-          }}
+          disabled
           placeholder="https://example.com/hooks/bluestrix"
           aria-label="Webhook URL"
-          className="flex-1 rounded-lg border border-slate-700 bg-black/60 px-3 py-2 font-mono text-sm text-slate-100 placeholder:text-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 rounded-lg border border-slate-700 bg-black/60 px-3 py-2 font-mono text-sm text-slate-100 placeholder:text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
         />
         <button
-          type="submit"
-          disabled={!url.trim()}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-shadow enabled:hover:bg-blue-500 enabled:hover:shadow-[0_0_15px_rgba(59,130,246,0.5)] disabled:cursor-not-allowed disabled:opacity-50"
+          type="button"
+          disabled
+          title="Webhook saving is not available yet"
+          className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-500 disabled:cursor-not-allowed"
         >
           Save Webhook
         </button>
-      </form>
-
-      <div aria-live="polite" className="mt-2 text-xs">
-        {error && <p className="text-red-400">{error}</p>}
-        {saved && (
-          <p className="inline-flex items-center gap-1.5 text-emerald-400">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Webhook saved (preview only, not persisted yet).
-          </p>
-        )}
       </div>
     </motion.div>
   );
@@ -179,20 +110,6 @@ function WebhookCard() {
 
 export default function IntegrationsPage() {
   const [query, setQuery] = useState("");
-  const [states, setStates] = useState<Record<string, ConnectState>>({});
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-
-  useEffect(() => {
-    const pending = timers.current;
-    return () => pending.forEach(clearTimeout);
-  }, []);
-
-  function connect(id: string) {
-    if (states[id] === "connecting" || states[id] === "connected") return;
-    setStates((s) => ({ ...s, [id]: "connecting" }));
-    const t = setTimeout(() => setStates((s) => ({ ...s, [id]: "connected" })), CONNECT_DELAY_MS);
-    timers.current.push(t);
-  }
 
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -226,11 +143,9 @@ export default function IntegrationsPage() {
 
         {items.length > 0 ? (
           <motion.div layout className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <AnimatePresence mode="popLayout">
-              {items.map((item) => (
-                <IntegrationCard key={item.id} item={item} state={states[item.id] ?? "idle"} onConnect={connect} />
-              ))}
-            </AnimatePresence>
+            {items.map((item) => (
+              <IntegrationCard key={item.id} item={item} />
+            ))}
           </motion.div>
         ) : (
           <div className="rounded-xl border border-dashed border-slate-800 p-8 text-center text-sm text-slate-500">
