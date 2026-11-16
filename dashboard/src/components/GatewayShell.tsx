@@ -13,12 +13,12 @@ import {
   Menu,
   MessageSquare,
   Puzzle,
-  Shield,
   User,
   X,
   type LucideIcon,
 } from "lucide-react";
 import { can } from "@/lib/roles";
+import { BlueStrixMark } from "@/components/BlueStrixMark";
 
 type NavItem = {
   href: string;
@@ -52,9 +52,7 @@ const SESSIONS: AgentSession[] = [
 function Logo() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-[0_0_15px_rgba(59,130,246,0.5)]">
-        <Shield className="h-5 w-5 text-white" aria-hidden="true" />
-      </div>
+      <BlueStrixMark className="h-9 w-9 shrink-0 drop-shadow-[0_0_10px_rgba(59,130,246,0.6)]" />
       <div className="leading-tight">
         <div className="text-base font-semibold tracking-tight text-white">BlueStrix</div>
         <div className="font-mono text-[10px] uppercase tracking-widest text-blue-400/80">

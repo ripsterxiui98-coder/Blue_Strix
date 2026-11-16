@@ -3,6 +3,7 @@
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { BlueStrixMark } from "@/components/BlueStrixMark";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -37,6 +38,7 @@ export default function LoginPage() {
         className="w-full max-w-md space-y-4 rounded-xl border border-slate-800 bg-slate-900 p-8 shadow-xl"
       >
         <div>
+          <BlueStrixMark className="mb-3 h-12 w-12" />
           <h1 className="text-2xl font-semibold">BlueStrix Login</h1>
           <p className="text-sm text-slate-400 mt-1">
             Production auth via API. No default passwords. Admin requires MFA TOTP.
