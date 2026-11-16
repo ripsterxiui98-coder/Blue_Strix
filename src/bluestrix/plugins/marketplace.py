@@ -81,18 +81,22 @@ class Marketplace:
             Path(existing.path).unlink(missing_ok=True)
         return self.install(source_path, hmac_secret=hmac_secret)
 
+    def _find_installed(self, plugin_id: str) -> Optional[PluginMeta]:
+        """Look only in install_dir. Catalog entries are read-only sources, not installs."""
+        for p in discover_local_plugins(self.install_dir):
+            if p.plugin_id == plugin_id or p.name == plugin_id:
+                return p
+        return None
+
     def uninstall(self, plugin_id: str) -> dict[str, Any]:
-        meta = self.get_plugin(plugin_id)
+        meta = self._find_installed(plugin_id)
         if meta is None:
-            return {"removed": False, "reason": "not found"}
+            return {"removed": False, "reason": "not installed"}
         path = Path(meta.path)
-        if path.exists() and self.install_dir in path.resolve().parents or path.parent == self.install_dir:
-            path.unlink(missing_ok=True)
-            return {"removed": True, "path": str(path)}
-        return {
-            "removed": False,
-            "reason": "refusing to delete outside install_dir (catalog is read-only)",
-        }
+        if path.resolve().parent != self.install_dir.resolve():
+            return {"removed": False, "reason": "refusing to delete outside install_dir"}
+        path.unlink(missing_ok=True)
+        return {"removed": True, "path": str(path)}
 
     def rate(self, plugin_id: str, score: int) -> dict:
         return self.ratings.rate(plugin_id, score)

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useState } from "react";
 import { RequireAuth } from "@/components/RequireAuth";
-import { createApproval, createProposal, fetchProposals } from "@/lib/api";
+import { accessTokenOf, createApproval, createProposal, fetchProposals } from "@/lib/api";
 import { can } from "@/lib/roles";
 
 export default function ApprovalsPage() {
@@ -20,7 +20,7 @@ export default function ApprovalsPage() {
     mutationFn: () =>
       createProposal(
         { finding_id: findingId, title, target, proposed_change: "See proposal title" },
-        session?.user?.name || "operator",
+        accessTokenOf(session),
       ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["proposals"] });
@@ -32,7 +32,7 @@ export default function ApprovalsPage() {
     mutationFn: (payload: { finding_id: string; proposal_id?: string }) =>
       createApproval(
         { ...payload, status: "approved" },
-        session?.user?.name || "operator",
+        accessTokenOf(session),
         token || undefined,
       ),
     onSuccess: () => {

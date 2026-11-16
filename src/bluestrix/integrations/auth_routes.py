@@ -101,6 +101,8 @@ def register(body: RegisterRequest, request: Request, db: Session = Depends(get_
     if existing:
         raise HTTPException(status_code=409, detail="email already registered")
     count = db.scalar(select(User).limit(1))
+    if count is not None and os.getenv("BLUESTRIX_ALLOW_REGISTRATION") != "1":
+        raise HTTPException(status_code=403, detail="registration is closed")
     if count is not None and role == "admin":
         # only first account may self-assign admin without existing admin token
         raise HTTPException(status_code=403, detail="admin role requires existing admin")
