@@ -7,16 +7,15 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from bluestrix.chains.evm_monitor import analyze_evm_logs
-from bluestrix.chains.solana_monitor import analyze_solana_notifications
 from bluestrix.core import repository as repo
 from bluestrix.core.audit import AuditLog
 from bluestrix.core.config import load_config
 from bluestrix.core.database import get_db
 from bluestrix.core.models import ActionType
 from bluestrix.intelligence.assets.wallet import AssetProtectionEngine
+from bluestrix.intelligence.attack_path import analyze_attack_paths
 from bluestrix.intelligence.code.analyzer import CodeIntelligenceEngine
-from bluestrix.intelligence.incident import create_incident, post_incident_report
+from bluestrix.intelligence.risk import rank_findings, score_finding
 from bluestrix.intelligence.verification.engine import VerificationEngine
 from bluestrix.intelligence.verification.persistence import (
     compare_with_previous_scan,
@@ -56,15 +55,17 @@ class ApprovalRequest(BaseModel):
     status: str = Field(default="approved", pattern="^(pending|approved|rejected)$")
 
 
-class EvmMonitorRequest(BaseModel):
-    logs: list[dict[str, Any]]
-    owner_contacts: list[str] = Field(default_factory=list)
-    large_transfer_threshold: int = 10**21
+class RiskScoreRequest(BaseModel):
+    findings: list[dict[str, Any]]
+    weights: dict[str, float] | None = None
 
 
-class SolanaMonitorRequest(BaseModel):
-    events: list[dict[str, Any]]
-    owner_contacts: list[str] = Field(default_factory=list)
+class AttackPathRequest(BaseModel):
+    graph: dict[str, Any]
+    source: str
+    target: str
+    max_depth: int = Field(default=8, ge=1, le=16)
+    max_paths: int = Field(default=20, ge=1, le=100)
 
 
 def _require_operator(
@@ -133,69 +134,37 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.post("/monitor/evm")
-    def monitor_evm(request: EvmMonitorRequest) -> dict[str, Any]:
-        """Classify EVM logs (read-only). Does not connect unless logs already fetched."""
-        signals = analyze_evm_logs(
-            request.logs, large_transfer_threshold=request.large_transfer_threshold
-        )
-        if not signals:
-            return {"signals": [], "incident": None}
-        incident = create_incident(
-            signals, chain="evm", owner_contacts=request.owner_contacts, notify=bool(request.owner_contacts)
-        )
+    @app.post("/risk/score")
+    def risk_score(request: RiskScoreRequest) -> dict[str, Any]:
+        """Score and rank findings — advisory only."""
+        ranked = rank_findings(request.findings, weights=request.weights)
         audit_log.record(
-            "onchain_evm_monitor",
-            incident.incident_id,
-            "OBSERVED",
-            f"{len(signals)} signals severity={incident.severity}",
+            "risk_score",
+            f"{len(ranked)} findings",
+            "COMPLETED",
+            "advisory ranking",
         )
-        return {
-            "signals": [
-                {
-                    "rule_id": s.rule_id,
-                    "title": s.title,
-                    "severity": s.severity,
-                    "category": s.category,
-                    "recommendation": s.recommendation,
-                    "evidence": s.evidence,
-                }
-                for s in signals
-            ],
-            "incident": post_incident_report(incident),
-        }
+        return {"count": len(ranked), "ranked": ranked, "auto_actions": []}
 
-    @app.post("/monitor/solana")
-    def monitor_solana(request: SolanaMonitorRequest) -> dict[str, Any]:
-        signals = analyze_solana_notifications(request.events)
-        if not signals:
-            return {"signals": [], "incident": None}
-        incident = create_incident(
-            signals,
-            chain="solana",
-            owner_contacts=request.owner_contacts,
-            notify=bool(request.owner_contacts),
-        )
+    @app.post("/risk/attack-path")
+    def risk_attack_path(request: AttackPathRequest) -> dict[str, Any]:
+        try:
+            result = analyze_attack_paths(
+                request.graph,
+                source=request.source,
+                target=request.target,
+                max_depth=request.max_depth,
+                max_paths=request.max_paths,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         audit_log.record(
-            "onchain_solana_monitor",
-            incident.incident_id,
-            "OBSERVED",
-            f"{len(signals)} signals severity={incident.severity}",
+            "attack_path_analysis",
+            f"{request.source}->{request.target}",
+            "COMPLETED",
+            f"{result['path_count']} paths",
         )
-        return {
-            "signals": [
-                {
-                    "rule_id": s.rule_id,
-                    "title": s.title,
-                    "severity": s.severity,
-                    "category": s.category,
-                    "recommendation": s.recommendation,
-                    "evidence": s.evidence,
-                }
-                for s in signals
-            ],
-            "incident": post_incident_report(incident),
-        }
+        return result
 
     @app.get("/findings")
     def list_findings(
