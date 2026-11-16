@@ -86,7 +86,8 @@ def test_health(client: TestClient) -> None:
 
 
 def test_findings_empty(client: TestClient) -> None:
-    resp = client.get("/findings")
+    headers, _ = _auth(client, "security_analyst")
+    resp = client.get("/findings", headers=headers)
     assert resp.status_code == 200
     assert resp.json()["count"] == 0
 
@@ -177,7 +178,7 @@ def test_remediation_flow(client: TestClient) -> None:
     assert create.status_code == 200
     proposal_id = create.json()["id"]
 
-    listed = client.get("/remediation/proposals")
+    listed = client.get("/remediation/proposals", headers=analyst)
     assert listed.status_code == 200
     assert listed.json()["count"] >= 1
 
@@ -189,6 +190,31 @@ def test_remediation_flow(client: TestClient) -> None:
     assert approval.status_code == 200
     assert approval.json()["token_stored"] == "hash_only"
 
-    audit = client.get("/audit")
+    audit = client.get("/audit", headers=analyst)
     assert audit.status_code == 200
     assert audit.json()["count"] >= 1
+
+
+def test_reads_require_bearer_token(client: TestClient) -> None:
+    assert client.get("/findings").status_code == 401
+    assert client.get("/findings/anything").status_code == 401
+    assert client.get("/audit").status_code == 401
+    assert client.get("/remediation/proposals").status_code == 401
+
+
+def test_health_stays_public(client: TestClient) -> None:
+    assert client.get("/health").status_code == 200
+
+
+def test_audit_permission(client: TestClient) -> None:
+    responder, _ = _auth(client, "incident_responder")
+    owner, _ = _auth(client, "protocol_owner")
+    assert client.get("/audit", headers=responder).status_code == 200
+    assert client.get("/audit", headers=owner).status_code == 403
+
+
+def test_proposals_read_permission(client: TestClient) -> None:
+    analyst, _ = _auth(client, "security_analyst")
+    responder, _ = _auth(client, "incident_responder")
+    assert client.get("/remediation/proposals", headers=analyst).status_code == 200
+    assert client.get("/remediation/proposals", headers=responder).status_code == 403

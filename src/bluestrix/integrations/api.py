@@ -227,7 +227,7 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         severity: Optional[str] = None,
         target: Optional[str] = None,
         limit: int = 100,
-        db: Session = Depends(get_db),
+        db: Session = Depends(get_db), user: User = Depends(_require("view_findings")),
     ) -> dict[str, Any]:
         rows = repo.list_findings(
             db, status=status, severity=severity, target=target, limit=min(limit, 500)
@@ -251,7 +251,7 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         }
 
     @app.get("/findings/{finding_id}")
-    def get_finding(finding_id: str, db: Session = Depends(get_db)) -> dict[str, Any]:
+    def get_finding(finding_id: str, db: Session = Depends(get_db), user: User = Depends(_require("view_findings"))) -> dict[str, Any]:
         row = repo.get_finding(db, finding_id)
         if row is None:
             raise HTTPException(status_code=404, detail="Finding not found")
@@ -295,7 +295,7 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
         return {"finding_id": finding_id, "status": row.status}
 
     @app.get("/audit")
-    def get_audit(limit: int = 50, db: Session = Depends(get_db)) -> dict[str, Any]:
+    def get_audit(limit: int = 50, db: Session = Depends(get_db), user: User = Depends(_require("view_audit"))) -> dict[str, Any]:
         events = repo.list_audit_events(db, limit=min(limit, 200))
         return {
             "count": len(events),
@@ -345,7 +345,7 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
 
     @app.get("/remediation/proposals")
     def get_remediation_proposals(
-        limit: int = 50, db: Session = Depends(get_db)
+        limit: int = 50, db: Session = Depends(get_db), user: User = Depends(_require("view_approvals"))
     ) -> dict[str, Any]:
         rows = repo.list_remediation_proposals(db, limit=min(limit, 200))
         return {
