@@ -8,7 +8,7 @@ const API_URL =
 
 /**
  * Production auth: credentials are verified by BlueStrix FastAPI (/auth/login).
- * No demo passwords, no hardcoded users. Role comes from the backend database.
+ * No default passwords, no hardcoded users. Role comes from the backend database.
  */
 export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt", maxAge: 15 * 60 },

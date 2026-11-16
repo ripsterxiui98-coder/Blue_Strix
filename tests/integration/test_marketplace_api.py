@@ -10,8 +10,8 @@ def test_marketplace_install_rate_review_uninstall(tmp_path: Path):
     install = tmp_path / "installed"
     catalog.mkdir()
     pack = {
-        "name": "demo-pack",
-        "plugin_id": "demo-pack",
+        "name": "bluestrix-pack",
+        "plugin_id": "bluestrix-pack",
         "version": "1.0.0",
         "kind": "custom",
         "rules": [
@@ -26,22 +26,22 @@ def test_marketplace_install_rate_review_uninstall(tmp_path: Path):
             }
         ],
     }
-    src = catalog / "demo.json"
+    src = catalog / "bluestrix.json"
     src.write_text(json.dumps(pack), encoding="utf-8")
 
     mkt = Marketplace(catalog_dir=catalog, install_dir=install)
-    discovered = mkt.discover(query="demo")
-    assert any(p["plugin_id"] == "demo-pack" for p in discovered)
+    discovered = mkt.discover(query="bluestrix")
+    assert any(p["plugin_id"] == "bluestrix-pack" for p in discovered)
 
     report = mkt.install(src)
     assert report["load"]["rules_loaded"] == 1
     assert mkt.registry.get("MKT-1") is not None
 
-    assert mkt.rate("demo-pack", 5)["average"] == 5
-    rev = mkt.review("demo-pack", "analyst", "Looks good", score=4)
-    assert rev["plugin_id"] == "demo-pack"
+    assert mkt.rate("bluestrix-pack", 5)["average"] == 5
+    rev = mkt.review("bluestrix-pack", "analyst", "Looks good", score=4)
+    assert rev["plugin_id"] == "bluestrix-pack"
 
-    removed = mkt.uninstall("demo-pack")
+    removed = mkt.uninstall("bluestrix-pack")
     assert removed["removed"] is True
 
 
