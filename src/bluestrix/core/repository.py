@@ -10,6 +10,7 @@ from typing import Any, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from bluestrix.core.audit_chain import GENESIS_PREV, build_chained_event
 from bluestrix.core.models_db import (
     ApprovalRecord,
     AuditEventRecord,
@@ -133,6 +134,15 @@ def update_finding_status(
     return record
 
 
+def _latest_audit_hash(session: Session) -> str:
+    stmt = select(AuditEventRecord).order_by(AuditEventRecord.timestamp.desc()).limit(1)
+    last = session.scalar(stmt)
+    if last is None:
+        return GENESIS_PREV
+    meta = last.metadata_ or {}
+    return str(meta.get("event_hash") or GENESIS_PREV)
+
+
 def create_audit_event(
     session: Session,
     *,
@@ -143,13 +153,28 @@ def create_audit_event(
     reason: str = "",
     metadata: Optional[dict[str, Any]] = None,
 ) -> AuditEventRecord:
+    prev = _latest_audit_hash(session)
+    chained = build_chained_event(
+        actor=actor,
+        action=action,
+        target=target,
+        decision=decision,
+        reason=reason,
+        metadata=metadata or {},
+        prev_hash=prev,
+    )
+    # Store chain material inside metadata_ to remain schema-compatible
+    meta = dict(chained.get("metadata") or {})
+    meta["prev_hash"] = chained["prev_hash"]
+    meta["event_hash"] = chained["event_hash"]
+    meta["chain_timestamp"] = chained["timestamp"]
     event = AuditEventRecord(
         actor=actor,
         action=action,
         target=target,
         decision=decision,
         reason=reason,
-        metadata_=metadata or {},
+        metadata_=meta,
     )
     session.add(event)
     session.commit()
@@ -160,6 +185,29 @@ def create_audit_event(
 def list_audit_events(session: Session, limit: int = 50) -> list[AuditEventRecord]:
     stmt = select(AuditEventRecord).order_by(AuditEventRecord.timestamp.desc()).limit(limit)
     return list(session.scalars(stmt).all())
+
+
+def list_audit_events_for_chain(session: Session, limit: int = 1000) -> list[dict[str, Any]]:
+    """Oldest-first dicts suitable for verify_chain."""
+    stmt = select(AuditEventRecord).order_by(AuditEventRecord.timestamp.asc()).limit(limit)
+    rows = list(session.scalars(stmt).all())
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        meta = dict(r.metadata_ or {})
+        out.append(
+            {
+                "actor": r.actor,
+                "action": r.action,
+                "target": r.target,
+                "decision": r.decision,
+                "reason": r.reason,
+                "metadata": {k: v for k, v in meta.items() if k not in {"prev_hash", "event_hash", "chain_timestamp"}},
+                "timestamp": meta.get("chain_timestamp") or (r.timestamp.isoformat() if r.timestamp else ""),
+                "prev_hash": meta.get("prev_hash", GENESIS_PREV),
+                "event_hash": meta.get("event_hash", ""),
+            }
+        )
+    return out
 
 
 def create_remediation_proposal(
