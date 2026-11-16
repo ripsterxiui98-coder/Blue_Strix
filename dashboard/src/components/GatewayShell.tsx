@@ -144,7 +144,9 @@ function SidebarContent({
               <li key={s.id}>
                 <button
                   type="button"
-                  className="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-slate-800/70"
+                  disabled
+                  title="Session history is not available yet"
+                  className="group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition enabled:hover:bg-slate-800/70 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <MessageSquare
                     className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500 transition group-hover:text-blue-400"

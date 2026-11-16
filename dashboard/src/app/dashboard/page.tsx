@@ -24,6 +24,13 @@ const BRANCHES = ["No branch", "main", "feat/ai-gateway-foundation", "fix/redact
 
 const MAX_TEXTAREA_HEIGHT = 240;
 
+/** Credits and billing are not wired to a backend yet, so the banner stays hidden. */
+const SHOW_CREDITS_BANNER = false;
+
+const CLI_INSTALL_COMMAND =
+  'git clone https://github.com/zixzax141298-ui/Blue_Strix.git && cd Blue_Strix && pip install -e ".[api,dev]"';
+const README_URL = "https://github.com/zixzax141298-ui/Blue_Strix#readme";
+
 function Dropdown({
   icon: Icon,
   label,
@@ -133,7 +140,8 @@ export default function AgentsPage() {
   const [repo, setRepo] = useState(REPOS[0]);
   const [branch, setBranch] = useState(BRANCHES[0]);
   const [prompt, setPrompt] = useState("");
-  const [yolo, setYolo] = useState(false);
+  // YOLO (auto-approve) is disabled: remediation always requires human approval.
+  const yolo = false;
   const [notice, setNotice] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -157,9 +165,20 @@ export default function AgentsPage() {
 
   function submit() {
     if (!canSubmit) return;
-    // BlueStrix preview: no backend call yet.
-    setNotice(`Task queued for ${repo} (${branch}) — agent backend not connected yet.`);
-    setPrompt("");
+    // The agent task endpoint does not exist yet, so nothing is executed.
+    // The prompt is kept so the user does not lose their input.
+    setNotice(`Agent backend is not available yet. Task for ${repo} (${branch}) was not run.`);
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5000);
+  }
+
+  async function copyCliCommand() {
+    try {
+      await navigator.clipboard.writeText(CLI_INSTALL_COMMAND);
+      setNotice("CLI install command copied to clipboard.");
+    } catch {
+      setNotice(`Copy failed. Run this manually: ${CLI_INSTALL_COMMAND}`);
+    }
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(null), 5000);
   }
@@ -213,14 +232,18 @@ export default function AgentsPage() {
               <button
                 type="button"
                 aria-label="Add attachment"
-                className="rounded-lg border border-slate-800 p-2 text-slate-400 transition hover:border-blue-500/60 hover:text-blue-400"
+                disabled
+                title="Attachments are not available yet"
+                className="rounded-lg border border-slate-800 p-2 text-slate-400 transition enabled:hover:border-blue-500/60 enabled:hover:text-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Plus className="h-4 w-4" aria-hidden="true" />
               </button>
               <button
                 type="button"
                 aria-label="Connect GitHub"
-                className="rounded-lg border border-slate-800 p-2 text-slate-400 transition hover:border-blue-500/60 hover:text-blue-400"
+                disabled
+                title="GitHub connection is not available yet"
+                className="rounded-lg border border-slate-800 p-2 text-slate-400 transition enabled:hover:border-blue-500/60 enabled:hover:text-blue-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Github className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -229,9 +252,10 @@ export default function AgentsPage() {
                 type="button"
                 role="switch"
                 aria-checked={yolo}
-                onClick={() => setYolo((v) => !v)}
-                title="Auto-approve agent actions (UI preview only)"
-                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-400 transition hover:text-slate-200"
+                aria-disabled="true"
+                disabled
+                title="Disabled: agent auto-approval is not available. Human approval is required."
+                className="flex cursor-not-allowed items-center gap-2 rounded-lg px-2 py-1.5 text-xs text-slate-500 opacity-60"
               >
                 <span
                   className={`relative h-5 w-9 rounded-full transition-colors ${
@@ -277,7 +301,7 @@ export default function AgentsPage() {
           </AnimatePresence>
         </div>
 
-        {/* Credits warning */}
+        {SHOW_CREDITS_BANNER && (
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -305,6 +329,7 @@ export default function AgentsPage() {
             </button>
           </div>
         </motion.div>
+        )}
 
         {/* Footer */}
         <div className="flex flex-col items-center gap-3 border-t border-slate-800 pt-6 text-center">
@@ -312,18 +337,21 @@ export default function AgentsPage() {
           <div className="flex flex-wrap justify-center gap-2">
             <button
               type="button"
+              onClick={copyCliCommand}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 transition hover:border-blue-500 hover:text-blue-300 hover:shadow-[0_0_15px_rgba(59,130,246,0.5)]"
             >
               <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
-              Install BlueStrix CLI
+              Copy CLI install command
             </button>
-            <button
-              type="button"
+            <a
+              href={README_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 font-mono text-xs text-slate-300 transition hover:border-blue-500 hover:text-blue-300 hover:shadow-[0_0_15px_rgba(59,130,246,0.5)]"
             >
               <Laptop className="h-3.5 w-3.5" aria-hidden="true" />
-              Install in your IDEs
-            </button>
+              IDE setup guide
+            </a>
           </div>
         </div>
       </div>
