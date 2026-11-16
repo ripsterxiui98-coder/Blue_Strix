@@ -7,6 +7,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from bluestrix.chains.evm_monitor import analyze_evm_logs
+from bluestrix.chains.solana_monitor import analyze_solana_notifications
 from bluestrix.core import repository as repo
 from bluestrix.core.audit import AuditLog
 from bluestrix.core.config import load_config
@@ -14,12 +16,12 @@ from bluestrix.core.database import get_db
 from bluestrix.core.models import ActionType
 from bluestrix.intelligence.assets.wallet import AssetProtectionEngine
 from bluestrix.intelligence.code.analyzer import CodeIntelligenceEngine
+from bluestrix.intelligence.incident import create_incident, post_incident_report
 from bluestrix.intelligence.verification.engine import VerificationEngine
 from bluestrix.intelligence.verification.persistence import (
     compare_with_previous_scan,
     save_scan_results,
 )
-from bluestrix.integrations.auth_routes import router as auth_router
 from bluestrix.policy.engine import PolicyEngine
 from bluestrix.policy.scope import ScopeEnforcer
 
@@ -54,6 +56,17 @@ class ApprovalRequest(BaseModel):
     status: str = Field(default="approved", pattern="^(pending|approved|rejected)$")
 
 
+class EvmMonitorRequest(BaseModel):
+    logs: list[dict[str, Any]]
+    owner_contacts: list[str] = Field(default_factory=list)
+    large_transfer_threshold: int = 10**21
+
+
+class SolanaMonitorRequest(BaseModel):
+    events: list[dict[str, Any]]
+    owner_contacts: list[str] = Field(default_factory=list)
+
+
 def _require_operator(
     x_bluestrix_operator: Optional[str] = Header(default=None, alias="X-BlueStrix-Operator"),
     x_bluestrix_approval_token: Optional[str] = Header(
@@ -77,7 +90,6 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
     verifier = VerificationEngine()
 
     app = FastAPI(title="BlueStrix v8.0", version="8.0.0")
-    app.include_router(auth_router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -120,6 +132,70 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
             return finding.model_dump(mode="json")
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/monitor/evm")
+    def monitor_evm(request: EvmMonitorRequest) -> dict[str, Any]:
+        """Classify EVM logs (read-only). Does not connect unless logs already fetched."""
+        signals = analyze_evm_logs(
+            request.logs, large_transfer_threshold=request.large_transfer_threshold
+        )
+        if not signals:
+            return {"signals": [], "incident": None}
+        incident = create_incident(
+            signals, chain="evm", owner_contacts=request.owner_contacts, notify=bool(request.owner_contacts)
+        )
+        audit_log.record(
+            "onchain_evm_monitor",
+            incident.incident_id,
+            "OBSERVED",
+            f"{len(signals)} signals severity={incident.severity}",
+        )
+        return {
+            "signals": [
+                {
+                    "rule_id": s.rule_id,
+                    "title": s.title,
+                    "severity": s.severity,
+                    "category": s.category,
+                    "recommendation": s.recommendation,
+                    "evidence": s.evidence,
+                }
+                for s in signals
+            ],
+            "incident": post_incident_report(incident),
+        }
+
+    @app.post("/monitor/solana")
+    def monitor_solana(request: SolanaMonitorRequest) -> dict[str, Any]:
+        signals = analyze_solana_notifications(request.events)
+        if not signals:
+            return {"signals": [], "incident": None}
+        incident = create_incident(
+            signals,
+            chain="solana",
+            owner_contacts=request.owner_contacts,
+            notify=bool(request.owner_contacts),
+        )
+        audit_log.record(
+            "onchain_solana_monitor",
+            incident.incident_id,
+            "OBSERVED",
+            f"{len(signals)} signals severity={incident.severity}",
+        )
+        return {
+            "signals": [
+                {
+                    "rule_id": s.rule_id,
+                    "title": s.title,
+                    "severity": s.severity,
+                    "category": s.category,
+                    "recommendation": s.recommendation,
+                    "evidence": s.evidence,
+                }
+                for s in signals
+            ],
+            "incident": post_incident_report(incident),
+        }
 
     @app.get("/findings")
     def list_findings(
@@ -278,11 +354,10 @@ def create_app(config_path: str = "config/bluestrix.yaml") -> FastAPI:
             proposal_id=body.proposal_id,
             approval_token=token,
         )
-        action = "approval_granted" if body.status == "approved" else "approval_denied"
         repo.create_audit_event(
             db,
             actor=op_name,
-            action=action,
+            action="remediation_approval",
             target=body.finding_id,
             decision=body.status.upper(),
             reason="human governance approval recorded",
