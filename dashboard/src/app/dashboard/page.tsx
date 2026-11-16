@@ -157,8 +157,8 @@ export default function AgentsPage() {
 
   function submit() {
     if (!canSubmit) return;
-    // Demo only: no backend call yet.
-    setNotice(`Task queued for ${repo} (${branch}) — demo only, agent backend not connected.`);
+    // BlueStrix preview: no backend call yet.
+    setNotice(`Task queued for ${repo} (${branch}) — agent backend not connected yet.`);
     setPrompt("");
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(null), 5000);

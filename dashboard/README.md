@@ -32,7 +32,7 @@ Requires BlueStrix API on `NEXT_PUBLIC_BLUESTRIX_API_URL` (default `http://127.0
 
 ## Pages
 
-- `/login` — role selection + demo credential
+- `/login` — role selection + credential login
 - `/dashboard` — severity summary
 - `/findings` — list + filters
 - `/findings/[id]` — detail

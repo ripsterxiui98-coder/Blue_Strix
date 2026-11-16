@@ -39,7 +39,7 @@ export default function LoginPage() {
         <div>
           <h1 className="text-2xl font-semibold">BlueStrix Login</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Production auth via API. No demo passwords. Admin requires MFA TOTP.
+            Production auth via API. No default passwords. Admin requires MFA TOTP.
           </p>
         </div>
         <label className="block text-sm">
