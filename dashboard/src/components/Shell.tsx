@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
+import { useState } from "react";
 import { can, type Permission } from "@/lib/roles";
+import { accessTokenOf } from "@/lib/api";
 
 const nav: { href: string; label: string; permission: Permission }[] = [
   { href: "/dashboard", label: "Dashboard", permission: "view_dashboard" },
@@ -14,10 +16,34 @@ const nav: { href: string; label: string; permission: Permission }[] = [
   { href: "/settings", label: "Settings", permission: "view_dashboard" },
 ];
 
+async function secureSignOut(accessToken: string) {
+  // 1) Revoke server session + refresh cookie
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      headers: {
+        Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        Accept: "application/json",
+      },
+    });
+  } catch {
+    // Continue — client session must still be cleared
+  }
+  // 2) Clear NextAuth JWT / cookies
+  await signOut({ callbackUrl: "/login" });
+}
+
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { data } = useSession();
   const role = data?.user?.role;
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await secureSignOut(accessTokenOf(data));
+  }
 
   return (
     <div className="min-h-screen flex">
@@ -28,13 +54,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
         {nav.map((item) => {
           if (!can(role, item.permission)) return null;
-          const active = pathname === item.href || pathname.startsWith(item.href + "/");
+          const active =
+            pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}
               href={item.href}
               className={`rounded px-3 py-2 text-sm ${
-                active ? "bg-brand-700 text-white" : "text-slate-300 hover:bg-slate-800"
+                active
+                  ? "bg-brand-700 text-white"
+                  : "text-slate-300 hover:bg-slate-800"
               }`}
             >
               {item.label}
@@ -42,14 +71,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
           );
         })}
         <div className="mt-auto pt-4 border-t border-slate-800 text-xs text-slate-400">
-          <div>{data?.user?.name}</div>
+          <div className="truncate">{data?.user?.name}</div>
           <div className="font-mono">{role}</div>
           <button
             type="button"
-            className="mt-2 text-brand-500"
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="mt-2 text-brand-500 hover:text-brand-400 disabled:opacity-50"
+            onClick={handleLogout}
+            disabled={loggingOut}
           >
-            Sign out
+            {loggingOut ? "Signing out…" : "Sign out"}
           </button>
         </div>
       </aside>
