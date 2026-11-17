@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import struct
 import time
-from typing import Iterable
+from typing import Iterable, Optional
 
 from bluestrix.core.security import decrypt_mfa_secret, encrypt_mfa_secret, generate_token, hash_token
 
@@ -55,10 +55,15 @@ def hash_recovery_codes(codes: Iterable[str]) -> list[str]:
 
 
 def consume_recovery_code(code: str, hashed_codes: list[str]) -> list[str] | None:
-    h = hash_token(code)
+    """Return remaining hashes after consuming ``code``, or None if not found.
+
+    Callers must persist the returned list in the same DB transaction that
+    grants access, so concurrent requests cannot both succeed on the same code.
+    Comparison uses hmac.compare_digest via membership of pre-hashed values.
+    """
+    if not code or not hashed_codes:
+        return None
+    h = hash_token(code.strip())
     if h not in hashed_codes:
         return None
     return [c for c in hashed_codes if c != h]
-
-
-from typing import Optional  # noqa: E402  — kept local for Optional in _totp default

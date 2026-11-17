@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
@@ -14,15 +15,20 @@ from sqlalchemy.orm import Session
 from bluestrix.core import repository as repo
 from bluestrix.core.auth import (
     ROLES,
+    TOKEN_TYPE_ACCESS,
+    TOKEN_TYPE_ENROLL,
     authenticate_user,
+    create_enrollment_token,
     create_session,
     decode_token,
+    resolve_access_claims,
     revoke_all_sessions,
     revoke_session,
     rotate_refresh,
 )
 from bluestrix.core.database import get_db
 from bluestrix.core.mfa import (
+    consume_recovery_code,
     decrypt_secret,
     encrypt_secret,
     generate_recovery_codes,
@@ -49,6 +55,7 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
     mfa_code: Optional[str] = None
+    recovery_code: Optional[str] = None
 
 
 class PasswordResetRequest(BaseModel):
@@ -88,6 +95,13 @@ def _set_refresh_cookie(response: Response, refresh: str, max_age: int) -> None:
 
 def _clear_refresh_cookie(response: Response) -> None:
     response.delete_cookie(REFRESH_COOKIE, path="/auth")
+
+
+def _bearer_token(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return auth.split(" ", 1)[1].strip()
 
 
 @router.post("/register")
@@ -162,13 +176,57 @@ def login(
         )
         raise HTTPException(status_code=401, detail="invalid credentials")
 
-    if user.role == "admin" or user.mfa_enabled:
-        if not body.mfa_code:
-            raise HTTPException(status_code=401, detail="mfa_required")
-        if not user.mfa_secret_encrypted:
-            raise HTTPException(status_code=401, detail="mfa_not_configured")
-        secret = decrypt_secret(user.mfa_secret_encrypted)
-        if not verify_totp(secret, body.mfa_code):
+    needs_mfa = user.role == "admin" or user.mfa_enabled
+
+    if needs_mfa and not user.mfa_enabled:
+        # Admin (or policy) requires MFA but enrollment is incomplete.
+        # Issue a short-lived enrollment token — never a full session.
+        enroll_token, enroll_ttl = create_enrollment_token(user)
+        repo.create_audit_event(
+            db,
+            actor=user.email,
+            action="mfa_enrollment_required",
+            target=str(user.id),
+            decision="PENDING",
+            reason="enrollment token issued",
+        )
+        return {
+            "mfa_enrollment_required": True,
+            "enrollment_token": enroll_token,
+            "token_type": "bearer",
+            "expires_in": enroll_ttl,
+            "email": user.email,
+            "role": user.role,
+            "note": "Complete MFA via /auth/mfa/setup and /auth/mfa/verify, then log in again.",
+        }
+
+    if needs_mfa and user.mfa_enabled:
+        code_ok = False
+        # Prefer TOTP when provided; recovery codes are a separate path.
+        if body.mfa_code and user.mfa_secret_encrypted:
+            secret = decrypt_secret(user.mfa_secret_encrypted)
+            if verify_totp(secret, body.mfa_code):
+                code_ok = True
+        if not code_ok and body.recovery_code:
+            remaining = consume_recovery_code(
+                body.recovery_code, list(user.mfa_recovery_hashes or [])
+            )
+            if remaining is not None:
+                # Atomic consume: persist remaining hashes before granting session.
+                user.mfa_recovery_hashes = remaining
+                db.commit()
+                code_ok = True
+                repo.create_audit_event(
+                    db,
+                    actor=user.email,
+                    action="recovery_code_used",
+                    target=str(user.id),
+                    decision="ALLOWED",
+                    reason="one recovery code consumed",
+                )
+        if not code_ok:
+            if not body.mfa_code and not body.recovery_code:
+                raise HTTPException(status_code=401, detail="mfa_required")
             repo.create_audit_event(
                 db,
                 actor=user.email,
@@ -229,7 +287,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
             claims = decode_token(auth.split(" ", 1)[1])
             actor = claims.get("email", "unknown")
             sid = claims.get("sid")
-            if sid:
+            if sid and claims.get("typ") == TOKEN_TYPE_ACCESS:
                 revoke_session(db, UUID(sid))
         except ValueError:
             pass
@@ -251,16 +309,13 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 @router.get("/session")
 def session_info(request: Request, db: Session = Depends(get_db)):
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing bearer token")
+    token = _bearer_token(request)
     try:
-        claims = decode_token(auth.split(" ", 1)[1])
+        claims, user, _ = resolve_access_claims(
+            db, token, allowed_types={TOKEN_TYPE_ACCESS}
+        )
     except ValueError:
         raise HTTPException(status_code=401, detail="invalid token") from None
-    user = db.get(User, UUID(claims["sub"]))
-    if user is None or not user.is_active:
-        raise HTTPException(status_code=401, detail="inactive")
     return {
         "email": user.email,
         "role": user.role,
@@ -298,8 +353,6 @@ def password_reset_request(
             reason="token issued",
         )
         # Production: send email. Dev returns token only when BLUESTRIX_DEV_RETURN_RESET_TOKEN=1
-        import os
-
         if os.getenv("BLUESTRIX_DEV_RETURN_RESET_TOKEN") == "1":
             return {"status": "ok", "dev_token": raw}
     return {"status": "ok"}
@@ -333,13 +386,18 @@ def password_reset_confirm(body: PasswordResetConfirm, db: Session = Depends(get
 
 @router.post("/mfa/setup")
 def mfa_setup(body: MfaEnableRequest, request: Request, db: Session = Depends(get_db)):
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    claims = decode_token(auth.split(" ", 1)[1])
-    user = db.get(User, UUID(claims["sub"]))
-    if user is None or not verify_password(body.password, user.password_hash):
+    token = _bearer_token(request)
+    try:
+        claims, user, _ = resolve_access_claims(
+            db, token, allowed_types={TOKEN_TYPE_ACCESS, TOKEN_TYPE_ENROLL}
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="unauthorized") from None
+    if not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid password")
+    # Enrollment token may only set up MFA; refuse if already enabled unless full access.
+    if user.mfa_enabled and claims.get("typ") == TOKEN_TYPE_ENROLL:
+        raise HTTPException(status_code=400, detail="mfa already enabled; log in with TOTP")
     secret = generate_totp_secret()
     codes = generate_recovery_codes()
     user.mfa_secret_encrypted = encrypt_secret(secret)
@@ -349,11 +407,12 @@ def mfa_setup(body: MfaEnableRequest, request: Request, db: Session = Depends(ge
     repo.create_audit_event(
         db,
         actor=user.email,
-        action="mfa_enabled",
+        action="mfa_setup",
         target=str(user.id),
         decision="PENDING_VERIFY",
         reason="secret issued",
     )
+    # Never log secret or recovery codes.
     return {
         "totp_secret": secret,
         "recovery_codes": codes,
@@ -368,11 +427,13 @@ def mfa_verify(body: MfaVerifyRequest, request: Request, db: Session = Depends(g
     )
     if not allowed:
         raise HTTPException(status_code=429, detail=f"rate limited; retry in {retry}s")
-    auth = request.headers.get("authorization", "")
-    if not auth.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    claims = decode_token(auth.split(" ", 1)[1])
-    user = db.get(User, UUID(claims["sub"]))
+    token = _bearer_token(request)
+    try:
+        claims, user, _ = resolve_access_claims(
+            db, token, allowed_types={TOKEN_TYPE_ACCESS, TOKEN_TYPE_ENROLL}
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="unauthorized") from None
     if user is None or not user.mfa_secret_encrypted:
         raise HTTPException(status_code=400, detail="mfa not setup")
     if not verify_totp(decrypt_secret(user.mfa_secret_encrypted), body.code):
@@ -387,4 +448,9 @@ def mfa_verify(body: MfaVerifyRequest, request: Request, db: Session = Depends(g
         decision="ALLOWED",
         reason="totp verified",
     )
-    return {"mfa_enabled": True}
+    # Enrollment tokens must NOT be upgraded to full access. Client must re-login.
+    return {
+        "mfa_enabled": True,
+        "relogin_required": claims.get("typ") == TOKEN_TYPE_ENROLL,
+        "note": "MFA enabled. Sign in again with password and TOTP to obtain a full session.",
+    }
