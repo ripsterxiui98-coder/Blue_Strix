@@ -20,8 +20,12 @@ from bluestrix.core.security import generate_token, get_jwt_secret, hash_token, 
 
 ACCESS_TTL_SECONDS = 15 * 60
 REFRESH_TTL_SECONDS = 30 * 24 * 3600
+ENROLLMENT_TTL_SECONDS = 10 * 60  # short-lived MFA enrollment only
 
 ROLES = {"admin", "security_analyst", "protocol_owner", "incident_responder"}
+
+TOKEN_TYPE_ACCESS = "access"
+TOKEN_TYPE_ENROLL = "mfa_enroll"
 
 
 def _b64url(data: bytes) -> str:
@@ -44,6 +48,7 @@ def _sign(payload: dict[str, Any], ttl: int) -> str:
 
 
 def decode_token(token: str) -> dict[str, Any]:
+    """Verify signature and expiry. Does not check session revocation."""
     try:
         h, p, s = token.split(".")
         expect = hmac.new(get_jwt_secret().encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()
@@ -55,6 +60,49 @@ def decode_token(token: str) -> dict[str, Any]:
         return body
     except Exception as exc:
         raise ValueError("invalid token") from exc
+
+
+def resolve_access_claims(
+    session: Session,
+    token: str,
+    *,
+    allowed_types: frozenset[str] | set[str] | None = None,
+) -> tuple[dict[str, Any], User, Optional[AuthSession]]:
+    """Decode token, enforce type, and validate DB session when present.
+
+    Full access tokens must carry typ=access and a non-revoked session (sid).
+    Enrollment tokens (typ=mfa_enroll) have no sid and must not be used on data routes.
+    """
+    if allowed_types is None:
+        allowed_types = frozenset({TOKEN_TYPE_ACCESS})
+    claims = decode_token(token)
+    typ = claims.get("typ")
+    if typ not in allowed_types:
+        raise ValueError("wrong token type")
+    user = session.get(User, uuid.UUID(str(claims["sub"])))
+    if user is None or not user.is_active:
+        raise ValueError("user inactive")
+
+    auth_session: Optional[AuthSession] = None
+    sid = claims.get("sid")
+    if typ == TOKEN_TYPE_ACCESS:
+        if not sid:
+            raise ValueError("missing session")
+        auth_session = session.get(AuthSession, uuid.UUID(str(sid)))
+        if auth_session is None or auth_session.revoked_at is not None:
+            raise ValueError("session revoked")
+        expires = auth_session.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if expires < datetime.now(timezone.utc):
+            raise ValueError("session expired")
+        if auth_session.user_id != user.id:
+            raise ValueError("session mismatch")
+    elif typ == TOKEN_TYPE_ENROLL:
+        # Enrollment tokens must not reference a full session.
+        if sid:
+            raise ValueError("enrollment token must not carry sid")
+    return claims, user, auth_session
 
 
 @dataclass
@@ -90,7 +138,7 @@ def create_session(
             "email": user.email,
             "role": user.role,
             "sid": str(auth_session.id),
-            "typ": "access",
+            "typ": TOKEN_TYPE_ACCESS,
         },
         ACCESS_TTL_SECONDS,
     )
@@ -101,6 +149,21 @@ def create_session(
         refresh_expires_in=REFRESH_TTL_SECONDS,
         session_id=auth_session.id,
     )
+
+
+def create_enrollment_token(user: User) -> tuple[str, int]:
+    """Short-lived token that only unlocks MFA setup/verify endpoints."""
+    token = _sign(
+        {
+            "sub": str(user.id),
+            "email": user.email,
+            "role": user.role,
+            "typ": TOKEN_TYPE_ENROLL,
+            "purpose": "mfa_enrollment",
+        },
+        ENROLLMENT_TTL_SECONDS,
+    )
+    return token, ENROLLMENT_TTL_SECONDS
 
 
 def rotate_refresh(

@@ -11,6 +11,50 @@ from typing import Optional
 
 # Prefer argon2; fall back to bcrypt; then PBKDF2-HMAC-SHA256 for tests without extras.
 
+# Placeholders that must never be used as real secrets.
+_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "",
+        "change-me",
+        "change-me-generate-a-long-random-string",
+        "changeme",
+        "secret",
+        "jwt-secret",
+    }
+)
+
+# Process-stable development fallback (generated once per process, not per request).
+_DEV_JWT_SECRET: Optional[str] = None
+
+# Deterministic secret used only when BLUESTRIX_ENV=test.
+_TEST_JWT_SECRET = "test-only-jwt-secret-do-not-use-in-prod-32b"
+
+
+def _env_name() -> str:
+    """Return normalized environment name.
+
+    Unset or unknown values are treated as production (fail-secure).
+    Only explicit development/test enable softer rules.
+    """
+    raw = (os.getenv("BLUESTRIX_ENV") or "").strip().lower()
+    if raw in {"development", "dev"}:
+        return "development"
+    if raw in {"test", "testing"}:
+        return "test"
+    # production, empty, or anything else → production rules
+    return "production"
+
+
+def _is_placeholder(value: Optional[str]) -> bool:
+    if value is None:
+        return True
+    v = value.strip()
+    if not v:
+        return True
+    if v.lower() in _PLACEHOLDER_SECRETS:
+        return True
+    return False
+
 
 def _pbkdf2_hash(password: str, salt: Optional[bytes] = None) -> str:
     salt = salt or secrets.token_bytes(16)
@@ -81,11 +125,64 @@ def generate_token(nbytes: int = 32) -> str:
 
 
 def get_jwt_secret() -> str:
+    """Return the HMAC secret for JWT signing.
+
+    Required env vars (see .env.example):
+      BLUESTRIX_JWT_SECRET  — primary (preferred)
+      NEXTAUTH_SECRET       — accepted fallback for shared deployments
+      BLUESTRIX_MFA_KEY     — separate material for MFA encryption (optional)
+      BLUESTRIX_ENV         — development | test | production
+
+    Behaviour:
+      - production (default for unset/unknown): rejects empty or placeholder secrets
+        at call time with RuntimeError (startup should call validate_secrets_or_die).
+      - development: process-stable ephemeral secret if none configured
+        (changes on restart; differs across workers — not for multi-worker prod).
+      - test: deterministic fixed secret for reproducible tests.
+
+    Changing the secret invalidates all existing access tokens immediately.
+    """
+    env = _env_name()
     secret = os.getenv("BLUESTRIX_JWT_SECRET") or os.getenv("NEXTAUTH_SECRET")
-    if not secret or secret in {"change-me", "change-me-generate-a-long-random-string"}:
-        # Dev-only ephemeral secret — production MUST set BLUESTRIX_JWT_SECRET
-        return os.getenv("BLUESTRIX_DEV_JWT_SECRET", secrets.token_hex(32))
-    return secret
+
+    if env == "test":
+        if secret and not _is_placeholder(secret):
+            return secret
+        return os.getenv("BLUESTRIX_DEV_JWT_SECRET") or _TEST_JWT_SECRET
+
+    if secret and not _is_placeholder(secret):
+        return secret
+
+    if env == "production":
+        raise RuntimeError(
+            "BLUESTRIX_JWT_SECRET (or NEXTAUTH_SECRET) must be set to a non-placeholder "
+            "value in production. Generate with: python3 -c \"import secrets; print(secrets.token_urlsafe(48))\""
+        )
+
+    # development only: process-stable fallback (once per process, not per request)
+    global _DEV_JWT_SECRET
+    explicit_dev = os.getenv("BLUESTRIX_DEV_JWT_SECRET")
+    if explicit_dev and not _is_placeholder(explicit_dev):
+        return explicit_dev
+    if _DEV_JWT_SECRET is None:
+        _DEV_JWT_SECRET = secrets.token_hex(32)
+    return _DEV_JWT_SECRET
+
+
+def validate_secrets_or_die() -> None:
+    """Call at application startup. Production refuses to start with bad secrets."""
+    env = _env_name()
+    if env != "production":
+        # Touch once so development caches a stable secret early.
+        get_jwt_secret()
+        return
+    # Force evaluation — raises RuntimeError if missing/placeholder.
+    get_jwt_secret()
+    mfa = os.getenv("BLUESTRIX_MFA_KEY")
+    if mfa is not None and _is_placeholder(mfa):
+        raise RuntimeError(
+            "BLUESTRIX_MFA_KEY is set to a placeholder; unset it or provide a strong value."
+        )
 
 
 def get_mfa_fernet_key() -> bytes:
