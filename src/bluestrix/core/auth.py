@@ -62,6 +62,31 @@ def decode_token(token: str) -> dict[str, Any]:
         raise ValueError("invalid token") from exc
 
 
+def decode_token_for_revocation(token: str) -> dict[str, Any]:
+    """Verify HS256 signature and required claims; allow expired tokens for logout only.
+
+    Still rejects bad signatures. Does not issue or extend tokens. Must not be used
+    for data-route authorization — use resolve_access_claims / decode_token instead.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            raise ValueError("malformed")
+        h, p, s = parts
+        header = json.loads(_b64url_decode(h))
+        if header.get("alg") != "HS256":
+            raise ValueError("unsupported alg")
+        expect = hmac.new(get_jwt_secret().encode(), f"{h}.{p}".encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(expect, _b64url_decode(s)):
+            raise ValueError("bad signature")
+        body = json.loads(_b64url_decode(p))
+        if not body.get("sub"):
+            raise ValueError("missing sub")
+        return body
+    except Exception as exc:
+        raise ValueError("invalid token") from exp
+
+
 def resolve_access_claims(
     session: Session,
     token: str,
@@ -192,6 +217,8 @@ def revoke_session(session: Session, session_id: uuid.UUID) -> bool:
     row = session.get(AuthSession, session_id)
     if row is None:
         return False
+    if row.revoked_at is not None:
+        return True  # idempotent
     row.revoked_at = datetime.now(timezone.utc)
     session.commit()
     return True
