@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { can } from "@/lib/roles";
+import { accessTokenOf } from "@/lib/api";
 import { BlueStrixMark } from "@/components/BlueStrixMark";
 
 type NavItem = {
@@ -49,6 +50,21 @@ const SESSIONS: AgentSession[] = [
   { id: "s5", title: "Triage Solana wallet alerts", when: "3d ago" },
 ];
 
+async function secureSignOut(accessToken: string) {
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      headers: {
+        Authorization: accessToken ? `Bearer ${accessToken}` : "",
+        Accept: "application/json",
+      },
+    });
+  } catch {
+    // still clear client session
+  }
+  await signOut({ callbackUrl: "/login" });
+}
+
 function Logo() {
   return (
     <div className="flex items-center gap-2.5">
@@ -66,9 +82,13 @@ function Logo() {
 function SidebarContent({
   idPrefix,
   onNavigate,
+  onLogout,
+  loggingOut,
 }: {
   idPrefix: string;
   onNavigate?: () => void;
+  onLogout: () => void;
+  loggingOut: boolean;
 }) {
   const pathname = usePathname();
   const { data } = useSession();
@@ -111,7 +131,9 @@ function SidebarContent({
               onClick={onNavigate}
               aria-current={active ? "page" : undefined}
               className={`relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                active ? "text-blue-100" : "text-slate-400 hover:bg-slate-900/80 hover:text-slate-100"
+                active
+                  ? "text-blue-100"
+                  : "text-slate-400 hover:bg-slate-900/80 hover:text-slate-100"
               }`}
             >
               {active && (
@@ -167,9 +189,10 @@ function SidebarContent({
           </div>
           <button
             type="button"
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={onLogout}
+            disabled={loggingOut}
             aria-label="Sign out"
-            className="rounded-md p-2 text-slate-500 transition hover:bg-slate-800 hover:text-blue-400"
+            className="rounded-md p-2 text-slate-500 transition hover:bg-slate-800 hover:text-blue-400 disabled:opacity-50"
           >
             <LogOut className="h-4 w-4" aria-hidden="true" />
           </button>
@@ -182,12 +205,14 @@ function SidebarContent({
 /**
  * Layout for the gateway pages: auth gate + fixed sidebar (desktop) / drawer (mobile).
  * Mirrors RequireAuth's behaviour (session check + `view_dashboard` permission).
+ * Logout always revokes the backend session before clearing the NextAuth cookie.
  */
 export function GatewayShell({ children }: { children: ReactNode }) {
   const { data, status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") router.replace("/login");
@@ -206,6 +231,12 @@ export function GatewayShell({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await secureSignOut(accessTokenOf(data));
+  }
 
   if (status === "loading") {
     return (
@@ -228,7 +259,11 @@ export function GatewayShell({ children }: { children: ReactNode }) {
 
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-slate-800 bg-black/70 backdrop-blur-xl lg:block">
-        <SidebarContent idPrefix="desktop" />
+        <SidebarContent
+          idPrefix="desktop"
+          onLogout={handleLogout}
+          loggingOut={loggingOut}
+        />
       </aside>
 
       {/* Mobile top bar */}
@@ -274,7 +309,12 @@ export function GatewayShell({ children }: { children: ReactNode }) {
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
-              <SidebarContent idPrefix="mobile" onNavigate={() => setOpen(false)} />
+              <SidebarContent
+                idPrefix="mobile"
+                onNavigate={() => setOpen(false)}
+                onLogout={handleLogout}
+                loggingOut={loggingOut}
+              />
             </motion.aside>
           </>
         )}
@@ -286,7 +326,8 @@ export function GatewayShell({ children }: { children: ReactNode }) {
             children
           ) : (
             <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 p-4 text-sm">
-              Access denied for role <code className="font-mono">{data.user.role}</code>.
+              Access denied for role{" "}
+              <code className="font-mono">{data.user.role}</code>.
             </div>
           )}
         </div>
